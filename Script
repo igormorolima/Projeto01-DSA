@@ -1,0 +1,211 @@
+## CONFIGURANDO O DIRETÓRIO DE TRABALHO
+setwd("C:/users/igor_/OneDrive/Ciência_de_Dados_(DSA)/1_Big_Data_Analytics_R_Azure_ML/20 - Projetos/")
+getwd()
+
+## INSTALANDO E CARREGANDO PACOTES
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("randomForest")
+install.packages("psych")
+install.packages("caret")
+
+library(readxl)
+library(dplyr)
+library(randomForest)
+library(psych)
+library(caret)
+
+## CARGA DE DADOS
+
+# Lista as worksheet no arquivo Excel
+excel_sheets("FEV-data-Excel.xlsx")
+
+# Lendo a planilha do Excel
+df <- read_excel("FEV-data-Excel.xlsx")
+
+## ANÁLISE EXPLORATÓRIA DOS DADOS
+
+View(df)
+summary(df)
+class(df)
+
+contagem_Make <- df %>%
+  group_by(Make) %>%
+  count()
+
+contagem_Make
+
+# Tratando NAs
+
+colSums(is.na(df))
+
+# Use colSums para contar o número de NA por coluna, agrupando por 'Make'
+resultados <- lapply(split(df[, -1], df$Make), function(sub_df) colSums(is.na(sub_df)))
+# Converta a lista de resultados para um data frame
+resultados_df <- as.data.frame(do.call(rbind, resultados))
+# Adicione a coluna 'Make' de volta ao data frame de resultados
+resultados_df$Make <- rownames(resultados_df)
+resultados_df
+
+# Decisão de eliminar as linhas com valores NAs, mesmo que signifique elimintar a Tesla do dataset, 
+#pois não apresentou nenhum valor da variável target (energy consumption)
+
+df2 <- na.omit(df)
+View(df2)
+
+contagem_Make2 <- df2 %>%
+  group_by(Make) %>%
+  count()
+
+contagem_Make2
+
+# Obs: optei por utilizar apenas as variáveis numéricas, por uma hipótese de que
+#as outras variáveis categóricas não influenciariam consideravelmente nosso modelo
+
+# Extraindo as variáveis numéricas
+numeric_variable_list <- sapply(df2, is.numeric)
+numerical_data <- df2[numeric_variable_list]
+
+# Matriz de Correlação
+cor(numerical_data)
+
+# Correlation Plot
+pairs.panels(numerical_data[c("Minimal price (gross) [PLN]",
+                              "Engine power [KM]",
+                              "Maximum torque [Nm]",
+                              "Battery capacity [kWh]",
+                              "Wheelbase [cm]",
+                              "Length [cm]",
+                              "Minimal empty weight [kg]",
+                              "Permissable gross weight [kg]",
+                              "Maximum speed [kph]",
+                              "Boot capacity (VDA) [l]",
+                              "mean - Energy consumption [kWh/100 km]")])
+
+# Premissa inicial: Dataset com as variáveis que apresentarem correção acima de 0,7
+df3 <- df2[c("Minimal price (gross) [PLN]",
+             "Engine power [KM]",
+             "Maximum torque [Nm]",
+             "Battery capacity [kWh]",
+             "Wheelbase [cm]",
+             "Length [cm]",
+             "Minimal empty weight [kg]",
+             "Permissable gross weight [kg]",
+             "Maximum speed [kph]",
+             "Boot capacity (VDA) [l]",
+             "mean - Energy consumption [kWh/100 km]")]
+View(df3)
+
+df4 <- df3
+
+colnames(df4) <- c(
+  "Minimal_price",
+  "Engine_power",
+  "Maximum_torque",
+  "Battery_capacity",
+  "Wheelbase",
+  "Length",
+  "Minimal_empty_weight",
+  "Permissable_gross_weight",
+  "Maximum_speed",
+  "Boot_capacity",
+  "mean_Energy_consumption"
+)
+
+colnames(df4)
+dim(df4)
+View(df4)
+
+## MODELOS DE REGRESSÃO
+
+# Obs: Irei testar aqui os modelos de Regressão Linear Simples e Random Forest, 
+#porém vale ressaltar que este último modelo têm a capacidade de ser complexo e 
+#propenso ao overfitting, especialmente quando é aplicado a
+#conjuntos de dados pequenos, como neste caso, onde o df possui apenas 42 linhas
+
+## REGRESSÃO LINEAR SIMPLES
+
+RLS_1 <- lm(mean_Energy_consumption ~ ., data = df4)
+summary(RLS_1)
+
+# Feature Selection
+RLS_2 <- lm(mean_Energy_consumption ~ Maximum_torque + 
+            Battery_capacity + Wheelbase + Length + 
+              Permissable_gross_weight + Boot_capacity, data = df4)
+summary(RLS_2)
+
+# Intensificando variáveis mais relevantes
+
+df4$Maximum_torque2 <- df4$Maximum_torque ^ 2
+df4$Permissable_gross_weight2 <- df4$Permissable_gross_weight ^ 2
+
+RLS_3 <- lm(mean_Energy_consumption ~ Maximum_torque2 + 
+              Battery_capacity + Wheelbase + Length + 
+              Permissable_gross_weight2, data = df4)
+summary(RLS_3)
+
+
+df4$Length2 <- df4$Length ^ 2
+RLS_4 <- lm(mean_Energy_consumption ~ Engine_power + Maximum_torque2 + 
+              Battery_capacity + Wheelbase * Length2 + 
+              Permissable_gross_weight2, data = df4)
+summary(RLS_4)
+
+# R² = 0,906
+
+## RANDOM FOREST
+
+require(randomForest)
+RF_1 <- randomForest(mean_Energy_consumption ~ ., 
+                        data = df4,
+                        ntree = 40, 
+                        nodesize = 5)
+
+RF_1
+
+# k-fold cross-validation
+
+num_folds <- 5
+
+cv_results <- train(
+  mean_Energy_consumption ~ .,
+  data = df4,
+  method = "rf",
+  trControl = trainControl(method = "cv", number = num_folds)
+)
+
+cv_results
+
+# Obs: descobrimos aqui que o mtry foi de 6, ou seja, o número de variáveis 
+#ótimo para otimizar o modelo reduzindo a RMSE
+
+RF_2 <- randomForest(mean_Energy_consumption ~ ., 
+                        data = df4,
+                        ntree = 40, 
+                        nodesize = 5,
+                        mtry = 6)
+RF_2
+
+RF_3 <- randomForest(mean_Energy_consumption ~ ., 
+                        data = df4,
+                        ntree = 100, 
+                        nodesize = 5,
+                        mtry = 6)
+RF_3
+
+RF_4 <- randomForest(mean_Energy_consumption ~ ., 
+                        data = df4,
+                        ntree = 100, 
+                        nodesize = 10,
+                        mtry = 6)
+RF_4
+
+# O melhor modelo de Random Forest obtido foi o RF_4, porém como nosso conjunto de
+#dados é muito pequeno e não pudemos dividi-lo em treino e teste, este modelo 
+#pode ser propenso ao overfitting, portanto usaremos o modelo de Regressão Linear
+#Simples RLS_4 com R² = 0,906
+
+# CONCLUSÃO: caso seja fornecido novo conjunto de dados de carros elétricos, podemos
+#prever o consumo médio de energia baseado em outras características dos veículos,
+#e assim embasar melhor a escolha da empresa de logística para o que a melhor atender.
+
